@@ -4,52 +4,54 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Custom Cold Storage–style theme -->
+  <link rel="stylesheet" href="/css/style.css">
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-  <title>Supermarket App</title>
+  <title>UnFairPrice</title>
 </head>
-<body>
-    <nav class="navbar navbar-expand-sm bg-dark navbar-dark">
-      <div class="container-fluid">
-        <a class="navbar-brand" href="/">Supermarket App</a>
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#collapsibleNavbar">
-          <span class="navbar-toggler-icon"></span>
-        </button>
-        <div class="collapse navbar-collapse" id="collapsibleNavbar">
-          <ul class="navbar-nav">
-            <% if (!user) {%>
-                <li class="nav-item">
-                    <a class="nav-link" href="/register">Register</a>
-                </li> 
-                <li class="nav-item">
-                    <a class="nav-link" href="/Login">Login</a>
-                </li> 
-            <% } else { %>
-                <li class="nav-item">
-                    <a class="nav-link" href="/Logout">Logout</a>
-                </li> 
+<body class="bg-light">
+  <%- include("partials/navbar") %>
+
+<div class="container py-5">
+    <div class="row align-items-center">
+      <div class="col-md-6 mb-4 mb-md-0">
+        <h1 class="display-5 fw-bold mb-3">Welcome to <span class="text-primary">UnFairPrice</span></h1>
+        <p class="lead text-muted">
+          Shop online in one simple web app.
+        </p>
+
+        <% if (user) { %>
+          <p class="mb-3">
+            You are logged in as <strong><%= user.username %></strong> (<%= user.role %>).
+          </p>
+          <div class="d-flex flex-wrap gap-2">
+            <a href="/shopping" class="btn btn-primary btn-lg">Start Shopping</a>
+            <% if (user.role === 'admin') { %>
+              <a href="/inventory" class="btn btn-outline-secondary btn-lg">Manage Inventory</a>
             <% } %>
-          </ul>
+          </div>
+        <% } else { %>
+          <p class="mb-3">Please log in or register to start shopping.</p>
+          <div class="d-flex flex-wrap gap-2">
+            <a href="/login" class="btn btn-primary btn-lg">Login</a>
+            <a href="/register" class="btn btn-outline-secondary btn-lg">Register</a>
+          </div>
+        <% } %>
+      </div>
+
+      <div class="col-md-6">
+        <div class="card shadow-sm border-0">
+          <div class="card-body">
+            <h5 class="card-title mb-3">Quick Info</h5>
+            <ul class="list-group list-group-flush">
+              <li class="list-group-item"><strong>Real-time Cart:</strong> Items are stored securely in your cart.</li>
+              <li class="list-group-item"><strong>Invoices:</strong> Generate an invoice when you checkout.</li>
+            </ul>
+          </div>
         </div>
       </div>
-    </nav>
-
-    <div class="container">
-        <p style="text-align: center;">
-            <% if (user) {%>
-              <% if (user.role === "admin") { %>
-                <br>
-                Back to <a href="/inventory">inventory!</a>
-              <% } else { %>
-                <br>
-                Continue <a href="/shopping">Shopping!</a>
-                <% } %>
-            <% } else { %>
-            <br>
-            Welcome to supermarket app! <br>
-            Please <a href = "/login" >login</a> to continue...
-            <% } %>
-        </p>
-        
     </div>
+  </div>
+  <script src="/js/main.js"></script>
 </body>
 </html>

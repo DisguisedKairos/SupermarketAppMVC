@@ -1,0 +1,74 @@
+<nav class="navbar navbar-expand-sm navbar-dark bg-dark">
+  <div class="container-fluid">
+      <a class="navbar-brand d-flex align-items-center" href="/">
+        <img src="/images/unfairprice-logo.png" alt="UnFairPrice logo" class="nav-logo me-2">
+      </a>
+
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#collapsibleNavbar">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+
+    <div class="collapse navbar-collapse" id="collapsibleNavbar">
+      <ul class="navbar-nav ms-auto align-items-center gap-1">
+        <% if (user) { %>
+          <li class="nav-item">
+            <a class="nav-link" href="/shopping">Shop</a>
+          </li>
+
+          <% if (user.role === 'admin') { %>
+            <li class="nav-item">
+              <a class="nav-link" href="/inventory">Inventory</a>
+            </li>
+          <% } %>
+
+          <li class="nav-item">
+            <a class="nav-link position-relative" href="/cart">
+              Cart
+              <span class="badge rounded-pill position-absolute top-0 start-100 translate-middle-x">
+                <%= cartCount || 0 %>
+              </span>
+            </a>
+          </li>
+
+          <li class="nav-item">
+            <a class="nav-link" href="/wishlist">Wishlist</a>
+          </li>
+
+          <li class="nav-item">
+            <a class="btn btn-sm btn-outline-light ms-2" href="/history">
+              Purchase History
+            </a>
+          </li>
+
+          <li class="nav-item">
+            <span class="navbar-text me-2">
+              Hello, <strong><%= user.username %></strong> (<%= user.role %>)
+            </span>
+          </li>
+
+          <li class="nav-item">
+            <a class="nav-link" href="/logout">Logout</a>
+          </li>
+        <% } else { %>
+          <li class="nav-item">
+            <a class="nav-link" href="/login">Login</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="/register">Register</a>
+          </li>
+        <% } %>
+
+        <li class="nav-item ms-2">
+          <button type="button"
+                  id="themeToggle"
+                  class="btn btn-sm btn-outline-secondary"
+                  data-mode="light"
+                  aria-label="Toggle dark mode">
+            🌙
+          </button>
+        </li>
+
+      </ul>
+    </div>
+  </div>
+</nav>
