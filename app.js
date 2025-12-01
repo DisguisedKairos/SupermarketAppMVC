@@ -8,6 +8,7 @@ require('dotenv').config();
 const app = express();
 
 // Ensure DB connection on startup
+// Ensure DB connection on startup
 require('./db');
 
 // Controllers
@@ -35,18 +36,43 @@ app.use(session({
 app.use(flash());
 
 // Multer for product image uploads
+const CartController = require('./controllers/CartController');
+const WishlistController = require('./controllers/WishlistController');
+const InvoiceController = require('./controllers/InvoiceController');
+const Cart = require('./models/Cart');
+
+// View engine
+app.set('view engine', 'ejs');
+app.set('views', path.join(__dirname, 'views'));
+
+// Middleware
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
+
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'supermarket_secret',
+  resave: false,
+  saveUninitialized: false
+}));
+app.use(flash());
+
+// Multer for product image uploads
 const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, path.join(__dirname, 'public', 'images')),
   destination: (req, file, cb) => cb(null, path.join(__dirname, 'public', 'images')),
   filename: (req, file, cb) => cb(null, Date.now() + '-' + file.originalname)
 });
 const upload = multer({ storage });
 
 // Auth guards
+// Auth guards
 const checkAuthenticated = (req, res, next) => {
   if (req.session.user) return next();
   req.flash('error', 'Please log in to view this resource');
   res.redirect('/login');
 };
+
 
 const checkAdmin = (req, res, next) => {
   if (req.session.user && req.session.user.role === 'admin') return next();
@@ -69,12 +95,32 @@ app.use((req, res, next) => {
   }
 });
 
+// Global locals: user + cart count for navbar badge
+app.use((req, res, next) => {
+  res.locals.user = req.session.user || null;
+  res.locals.cartCount = 0;
+
+  if (req.session.user) {
+    Cart.countItems(req.session.user.id, (err, count) => {
+      if (!err) res.locals.cartCount = count;
+      next();
+    });
+  } else {
+    next();
+  }
+});
+
 // Routes
 app.get('/', (req, res) => res.render('index', {
   messages: req.flash('success') || [],
   errors: req.flash('error') || []
 }));
+app.get('/', (req, res) => res.render('index', {
+  messages: req.flash('success') || [],
+  errors: req.flash('error') || []
+}));
 
+// Auth routes
 // Auth routes
 app.get('/login', AuthController.loginForm);
 app.post('/login', AuthController.login);
@@ -85,7 +131,11 @@ app.get('/logout', AuthController.logout);
 // Shopping/customer routes
 app.get('/shopping', checkAuthenticated, ProductController.shopping);
 app.get('/product/:id', checkAuthenticated, ProductController.view);
+// Shopping/customer routes
+app.get('/shopping', checkAuthenticated, ProductController.shopping);
+app.get('/product/:id', checkAuthenticated, ProductController.view);
 
+// Admin inventory routes
 // Admin inventory routes
 app.get('/inventory', checkAuthenticated, checkAdmin, ProductController.inventory);
 app.get('/addProduct', checkAuthenticated, checkAdmin, ProductController.addForm);
@@ -93,76 +143,58 @@ app.post('/addProduct', checkAuthenticated, checkAdmin, upload.single('image'), 
 app.get('/editProduct/:id', checkAuthenticated, checkAdmin, ProductController.editForm);
 app.post('/editProduct/:id', checkAuthenticated, checkAdmin, upload.single('image'), ProductController.update);
 app.get('/deleteProduct/:id', checkAuthenticated, checkAdmin, ProductController.delete);
-
-// Simple cart using session (minimal wiring for existing views)
-app.get('/cart', (req, res) => {
-  const cart = req.session.cart || [];
-  res.render('cart', { cart, user: req.session.user });
-});
-app.get('/addToCart/:id', (req, res) => {
-  const productId = parseInt(req.params.id || req.query.id, 10);
-  const quantity = parseInt(req.query.qty || req.body?.quantity || '1', 10);
-  if (!req.session.cart) req.session.cart = [];
-  Product.getById(productId, (err, product) => {
-    if (err || !product) return res.status(404).send('Product not found');
-    const existing = req.session.cart.find(i => i.id === productId);
-    if (existing) {
-      existing.quantity += quantity;
-    } else {
-      req.session.cart.push({
-        id: product.id,
-        productName: product.productName,
-        price: product.price,
-        quantity: quantity,
-        image: product.image
-      });
-    }
-    res.redirect('/cart');
-  });
-});
-
-app.get('/removeFromCart/:id', (req, res) => {
-  const productId = parseInt(req.params.id, 10);
-  req.session.cart = (req.session.cart || []).filter(i => i.id !== productId);
-  res.redirect('/cart');
-});
+// Admin user management
+app.get('/admin/users', checkAuthenticated, checkAdmin, AuthController.listUsers);
+app.get('/admin/users/:id/edit', checkAuthenticated, checkAdmin, AuthController.editUserForm);
+app.post('/admin/users/:id/edit', checkAuthenticated, checkAdmin, AuthController.updateUser);
 
 
-// Route aliases to support older links using /updateProduct/:id
-app.get('/updateProduct/:id', checkAuthenticated, checkAdmin, ProductController.editForm);
-app.post('/updateProduct/:id', checkAuthenticated, checkAdmin, upload.single('image'), ProductController.update);
+// Wishlist routes
+app.get('/wishlist', checkAuthenticated, WishlistController.list);
+app.post('/wishlist/add/:id', checkAuthenticated, WishlistController.add);
+app.post('/wishlist/remove/:id', checkAuthenticated, WishlistController.remove);
 
+// Cart routes
+app.get('/cart', checkAuthenticated, CartController.index);
+app.post('/cart/add/:id', checkAuthenticated, CartController.add);
+// backwards compatible add-to-cart
+app.post('/add-to-cart/:id', checkAuthenticated, CartController.add);
 
+app.post('/cart/update/:cartId', checkAuthenticated, CartController.update);
+app.post('/cart/remove/:cartId', checkAuthenticated, CartController.remove);
+app.post('/cart/clear', checkAuthenticated, CartController.clear);
 
+// Checkout & payment & invoice
+app.post('/checkout', checkAuthenticated, InvoiceController.checkout);
+app.get('/payment', checkAuthenticated, InvoiceController.paymentForm);
+app.post('/payment', checkAuthenticated, InvoiceController.processPayment);
+app.get('/invoice/:id', checkAuthenticated, InvoiceController.view);
+app.get('/history', checkAuthenticated, InvoiceController.history);
 
-// Canonical cart routes (standardised)
-app.get('/cart', (req, res) => {
-  const cart = req.session.cart || [];
-  res.render('cart', { cart, user: req.session.user });
-});
+// Start server
 
-app.post('/add-to-cart/:id', (req, res) => {
-  const productId = parseInt(req.params.id, 10);
-  const quantity = parseInt(req.body?.quantity || req.query.qty || '1', 10);
-  if (!req.session.cart) req.session.cart = [];
-  const Product = require('./models/Product');
-  Product.getById(productId, (err, product) => {
-    if (err || !product) return res.status(404).send('Product not found');
-    const existing = req.session.cart.find(i => i.id === productId);
-    if (existing) {
-      existing.quantity += quantity;
-    } else {
-      req.session.cart.push({
-        id: product.id,
-        productName: product.productName,
-        price: product.price,
-        quantity: quantity,
-        image: product.image
-      });
-    }
-    res.redirect('/cart');
-  });
-});
+// Wishlist routes
+app.get('/wishlist', checkAuthenticated, WishlistController.list);
+app.post('/wishlist/add/:id', checkAuthenticated, WishlistController.add);
+app.post('/wishlist/remove/:id', checkAuthenticated, WishlistController.remove);
 
+// Cart routes
+app.get('/cart', checkAuthenticated, CartController.index);
+app.post('/cart/add/:id', checkAuthenticated, CartController.add);
+// backwards compatible add-to-cart
+app.post('/add-to-cart/:id', checkAuthenticated, CartController.add);
+
+app.post('/cart/update/:cartId', checkAuthenticated, CartController.update);
+app.post('/cart/remove/:cartId', checkAuthenticated, CartController.remove);
+app.post('/cart/clear', checkAuthenticated, CartController.clear);
+
+// Checkout & payment & invoice
+app.post('/checkout', checkAuthenticated, InvoiceController.checkout);
+app.get('/payment', checkAuthenticated, InvoiceController.paymentForm);
+app.post('/payment', checkAuthenticated, InvoiceController.processPayment);
+app.get('/invoice/:id', checkAuthenticated, InvoiceController.view);
+app.get('/history', checkAuthenticated, InvoiceController.history);
+
+// Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
