@@ -93,34 +93,76 @@ app.post('/addProduct', checkAuthenticated, checkAdmin, upload.single('image'), 
 app.get('/editProduct/:id', checkAuthenticated, checkAdmin, ProductController.editForm);
 app.post('/editProduct/:id', checkAuthenticated, checkAdmin, upload.single('image'), ProductController.update);
 app.get('/deleteProduct/:id', checkAuthenticated, checkAdmin, ProductController.delete);
-// Admin user management
-app.get('/admin/users', checkAuthenticated, checkAdmin, AuthController.listUsers);
-app.get('/admin/users/:id/edit', checkAuthenticated, checkAdmin, AuthController.editUserForm);
-app.post('/admin/users/:id/edit', checkAuthenticated, checkAdmin, AuthController.updateUser);
+
+// Simple cart using session (minimal wiring for existing views)
+app.get('/cart', (req, res) => {
+  const cart = req.session.cart || [];
+  res.render('cart', { cart, user: req.session.user });
+});
+app.get('/addToCart/:id', (req, res) => {
+  const productId = parseInt(req.params.id || req.query.id, 10);
+  const quantity = parseInt(req.query.qty || req.body?.quantity || '1', 10);
+  if (!req.session.cart) req.session.cart = [];
+  Product.getById(productId, (err, product) => {
+    if (err || !product) return res.status(404).send('Product not found');
+    const existing = req.session.cart.find(i => i.id === productId);
+    if (existing) {
+      existing.quantity += quantity;
+    } else {
+      req.session.cart.push({
+        id: product.id,
+        productName: product.productName,
+        price: product.price,
+        quantity: quantity,
+        image: product.image
+      });
+    }
+    res.redirect('/cart');
+  });
+});
+
+app.get('/removeFromCart/:id', (req, res) => {
+  const productId = parseInt(req.params.id, 10);
+  req.session.cart = (req.session.cart || []).filter(i => i.id !== productId);
+  res.redirect('/cart');
+});
 
 
-// Wishlist routes
-app.get('/wishlist', checkAuthenticated, WishlistController.list);
-app.post('/wishlist/add/:id', checkAuthenticated, WishlistController.add);
-app.post('/wishlist/remove/:id', checkAuthenticated, WishlistController.remove);
+// Route aliases to support older links using /updateProduct/:id
+app.get('/updateProduct/:id', checkAuthenticated, checkAdmin, ProductController.editForm);
+app.post('/updateProduct/:id', checkAuthenticated, checkAdmin, upload.single('image'), ProductController.update);
 
-// Cart routes
-app.get('/cart', checkAuthenticated, CartController.index);
-app.post('/cart/add/:id', checkAuthenticated, CartController.add);
-// backwards compatible add-to-cart
-app.post('/add-to-cart/:id', checkAuthenticated, CartController.add);
 
-app.post('/cart/update/:cartId', checkAuthenticated, CartController.update);
-app.post('/cart/remove/:cartId', checkAuthenticated, CartController.remove);
-app.post('/cart/clear', checkAuthenticated, CartController.clear);
 
-// Checkout & payment & invoice
-app.post('/checkout', checkAuthenticated, InvoiceController.checkout);
-app.get('/payment', checkAuthenticated, InvoiceController.paymentForm);
-app.post('/payment', checkAuthenticated, InvoiceController.processPayment);
-app.get('/invoice/:id', checkAuthenticated, InvoiceController.view);
-app.get('/history', checkAuthenticated, InvoiceController.history);
 
-// Start server
+// Canonical cart routes (standardised)
+app.get('/cart', (req, res) => {
+  const cart = req.session.cart || [];
+  res.render('cart', { cart, user: req.session.user });
+});
+
+app.post('/add-to-cart/:id', (req, res) => {
+  const productId = parseInt(req.params.id, 10);
+  const quantity = parseInt(req.body?.quantity || req.query.qty || '1', 10);
+  if (!req.session.cart) req.session.cart = [];
+  const Product = require('./models/Product');
+  Product.getById(productId, (err, product) => {
+    if (err || !product) return res.status(404).send('Product not found');
+    const existing = req.session.cart.find(i => i.id === productId);
+    if (existing) {
+      existing.quantity += quantity;
+    } else {
+      req.session.cart.push({
+        id: product.id,
+        productName: product.productName,
+        price: product.price,
+        quantity: quantity,
+        image: product.image
+      });
+    }
+    res.redirect('/cart');
+  });
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
