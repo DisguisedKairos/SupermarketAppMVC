@@ -4,82 +4,172 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Custom Cold Storage–style theme -->
+  <link rel="stylesheet" href="/css/style.css">
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-  <title>Supermarket App</title>
+  <title>UnFairPrice - Shop</title>
 </head>
-<body>
-    <nav class="navbar navbar-expand-sm bg-dark navbar-dark">
-      <div class="container-fluid">
-        <a class="navbar-brand" href="/">Supermarket App</a>
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#collapsibleNavbar">
-          <span class="navbar-toggler-icon"></span>
-        </button>
-        <div class="collapse navbar-collapse" id="collapsibleNavbar">
-          <ul class="navbar-nav">
-            <li class="nav-item">
-              <a class="nav-link" href="/cart">View Cart</a>
-            </li> 
-            <li class="nav-item">
-              <a class="nav-link" href="/logout">Logout</a>
-            </li> 
-          </ul>
+<body class="bg-light">
+  <%- include("partials/navbar") %>
+
+<div class="container py-4">
+    <h2 class="mb-3">Shop Products</h2>
+
+    <% if (messages && messages.length > 0) { %>
+      <div class="alert alert-danger">
+        <% messages.forEach(function(msg) { %>
+          <p class="mb-0"><%= msg %></p>
+        <% }); %>
+      </div>
+    <% } %>
+
+    <form method="GET" action="/shopping" class="row g-2 align-items-end mb-3 p-3 bg-white shadow-sm rounded cs-animate" data-animate-delay="1">
+      <div class="col-md-3">
+        <label class="form-label">Search</label>
+        <input type="text" name="q" class="form-control" placeholder="Product name"
+               value="<%= search || '' %>">
+      </div>
+
+      <div class="col-md-2">
+        <label class="form-label">Category</label>
+        <select name="category" class="form-select">
+          <option value="all" <%= category === 'all' ? 'selected' : '' %>>All Categories</option>
+          <% if (categories && categories.length) { %>
+            <% categories.forEach(function(cat) { %>
+              <option value="<%= cat %>" <%= category === cat ? 'selected' : '' %>><%= cat %></option>
+            <% }); %>
+          <% } %>
+        </select>
+      </div>
+
+      <div class="col-md-2">
+        <label class="form-label">Min Price</label>
+        <input type="number" step="0.01" min="0" name="minPrice" class="form-control"
+               value="<%= minPrice || '' %>">
+      </div>
+
+      <div class="col-md-2">
+        <label class="form-label">Max Price</label>
+        <input type="number" step="0.01" min="0" name="maxPrice" class="form-control"
+               value="<%= maxPrice || '' %>">
+      </div>
+
+      <div class="col-md-2">
+        <label class="form-label">Sort By</label>
+        <select name="sort" class="form-select">
+          <option value="productName" <%= sort === 'productName' ? 'selected' : '' %>>Name</option>
+          <option value="price" <%= sort === 'price' ? 'selected' : '' %>>Price</option>
+          <option value="quantity" <%= sort === 'quantity' ? 'selected' : '' %>>Stock</option>
+          <option value="category" <%= sort === 'category' ? 'selected' : '' %>>Category</option>
+          <option value="id" <%= sort === 'id' ? 'selected' : '' %>>Newest</option>
+        </select>
+      </div>
+
+      <div class="col-md-1">
+        <label class="form-label">Dir</label>
+        <select name="dir" class="form-select">
+          <option value="asc" <%= dir === 'asc' ? 'selected' : '' %>>Asc</option>
+          <option value="desc" <%= dir === 'desc' ? 'selected' : '' %>>Desc</option>
+        </select>
+      </div>
+
+      <div class="col-md-3 mt-2">
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="inStock" name="inStock" value="1"
+                 <%= inStockOnly ? 'checked' : '' %>>
+          <label class="form-check-label" for="inStock">In-stock only</label>
         </div>
       </div>
-    </nav>
 
-  <div class="container">
-    <p>Welcome, <%= user.username %> (<%= user.role %>)</p>
-    <br>
-    <div class="text-center"><h2>Products from Supermarket</h2></div>
-    <br>
-    <table class="table table-hover small text-center">
-      <thead>
-          <tr>
-            <th width="100">Product Name</th>
-            <th width="100">Product Image</th>
-            <th width="50">Quantity</th>
-            <th width="50">Price</th>
-            <th width="50">Quantity</th>
-            <th width="50">Buy</th>
-          </tr>
-      </thead>
-      <tbody>
-        <% for(let i=0; i < products.length; i++) { %>
-          <tr>
-            <td><a href="/product/<%= products[i].id %>" ><%= products[i].productName %></a></td>
-            <td><img src = "images/<%= products[i].image %>" width="20%"></td>
-            <td><%= products[i].quantity %></td>
-            <td>$<%= products[i].price.toFixed(2) %></td>
-            <!-- <td>
-              <select id="role" name="role" class="form-control" >
-                <option value="1" selected >1</option>
-                <option value="2" >2</option>
-                <option value="3" >3</option>
-                <option value="4" >4</option>
-                <option value="5" >5</option>
-              </select>
-            </td> -->
-            <!-- Buy Link -->
-            <!-- <td><a href="/buyProduct/<%#= products[i].id %>" class="btn btn-primary mt-3">Buy</a></td> -->
-            <td>
-              <select class="form-control" onchange="document.getElementById('quantity-<%= products[i].id %>').value = this.value">
-                <% for (let q = 1; q <= 5; q++) { %>
-                  <option value="<%= q %>"><%= q %></option>
-                <% } %>
-              </select>
-            </td>
+      <div class="col-md-9 mt-2 text-end">
+        <button type="submit" class="btn btn-primary me-2">Apply</button>
+        <a href="/shopping" class="btn btn-outline-secondary">Reset</a>
+      </div>
+    </form>
+    <% if (!products || products.length === 0) { %>
+      <div class="alert alert-info">
+        No products found. Try adjusting your filters.
+      </div>
+    <% } else { %>
+      <div class="row g-3 mt-2 cs-animate" data-animate-delay="2">
+        <% for (let i = 0; i < products.length; i++) { %>
+          <div class="col-12 col-sm-6 col-md-4 col-lg-3">
+            <div class="card product-card h-100">
+              <% if (products[i].image) { %>
+                <img src="/images/<%= products[i].image %>" class="card-img-top" alt="<%= products[i].productName %>">
+              <% } else { %>
+                <div class="card-img-top d-flex align-items-center justify-content-center bg-light" style="height: 180px;">
+                  <span class="text-muted small">No image</span>
+                </div>
+              <% } %>
 
-            <td>
-                <form action="/add-to-cart/<%= products[i].id %>" method="POST">
-                  <input type="hidden" name="quantity" id="quantity-<%= products[i].id %>" value="1">
-                  <button type="submit" class="btn btn-primary mt-3">Buy</button>
-                </form>
-            </td>
+              <div class="card-body d-flex flex-column">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                  <h5 class="card-title mb-0"><%= products[i].productName %></h5>
+                  <% if (user) { 
+                       const inWishlist = (wishlistProductIds || []).includes(products[i].id);
+                  %>
+                    <form action="/wishlist/<%= inWishlist ? 'remove' : 'add' %>/<%= products[i].id %>" method="POST" class="ms-2">
+                      <button type="submit"
+                              class="btn btn-sm btn-outline-danger wishlist-btn"
+                              title="<%= inWishlist ? 'Remove from wishlist' : 'Save for later' %>">
+                        <%= inWishlist ? '♥' : '♡' %>
+                      </button>
+                    </form>
+                  <% } %>
+                </div>
+                <p class="mb-1">
+                  <a href="/product/<%= products[i].id %>" class="link-secondary small text-decoration-none">View details</a>
+                </p>
 
-          </tr>
+                <p class="mb-1">
+                  <span class="badge bg-info text-dark me-1"><%= products[i].category || 'General' %></span>
+                </p>
+
+                <p class="mb-1 small">
+                  <% if (products[i].quantity > 0) { %>
+                    <span class="badge bg-success me-1"><%= products[i].quantity %> in stock</span>
+                  <% } else { %>
+                    <span class="badge bg-secondary me-1">Out of stock</span>
+                  <% } %>
+
+                  <% if (products[i].quantity > 20) { %>
+                    <span class="badge bg-danger text-white me-1">Best seller</span>
+                  <% } %>
+                  <% if (products[i].quantity > 0 && products[i].quantity <= 5) { %>
+                    <span class="badge bg-warning text-dark me-1">Low stock</span>
+                  <% } %>
+                  <% if (Number(products[i].price) <= 3) { %>
+                    <span class="badge bg-success text-white">Hot deal</span>
+                  <% } %>
+                </p>
+
+                <p class="fw-bold fs-6 mb-3 mt-auto">$<%= Number(products[i].price).toFixed(2) %></p>
+
+                <div class="mt-auto">
+                  <% if (products[i].quantity > 0) { %>
+                    <form action="/cart/add/<%= products[i].id %>" method="POST" class="d-flex align-items-center">
+                      <input type="number"
+                             min="1"
+                             max="<%= products[i].quantity %>"
+                             name="quantity"
+                             value="1"
+                             class="form-control form-control-sm me-2"
+                             style="width: 80px;">
+                      <button type="submit" class="btn btn-sm btn-primary">Add</button>
+                    </form>
+                  <% } else { %>
+                    <span class="text-muted small">Currently unavailable</span>
+                  <% } %>
+                </div>
+              </div>
+            </div>
+          </div>
         <% } %>
-      </tbody>
-    </table>
+      </div>
+    <% } %>
+
   </div>
+  <script src="/js/main.js"></script>
 </body>
 </html>
