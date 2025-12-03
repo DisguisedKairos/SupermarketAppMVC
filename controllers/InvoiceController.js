@@ -130,7 +130,8 @@ const InvoiceController = {
         user,
         invoices,
         errors: req.flash('error') || [],
-        messages: req.flash('success') || []
+        messages: req.flash('success') || [],
+        viewedUserId: null
       });
     });
   }
