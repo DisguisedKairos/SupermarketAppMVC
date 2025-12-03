@@ -130,6 +130,62 @@ const AuthController = {
     });
   },
 
+
+  viewUserHistory(req, res) {
+    const userId = req.params.id;
+    const loggedUser = req.session.user;
+
+    // Only admin allowed (additional safety; routes already use checkAdmin)
+    if (!loggedUser || loggedUser.role !== 'admin') {
+      return res.status(403).send('Forbidden');
+    }
+
+    // Lazy-load Invoice model to avoid circular requires at top
+    const Invoice = require('../models/Invoice');
+
+    Invoice.findByUserId(userId, (err, invoices) => {
+      if (err) {
+        console.error(err);
+        req.flash('error', 'Could not load purchase history for this user');
+        return res.redirect('/admin/users');
+      }
+
+      // Render same history view but pass a flag / target user id
+      res.render('history', {
+        user: loggedUser,
+        invoices,
+        errors: req.flash('error') || [],
+        messages: req.flash('success') || [],
+        viewedUserId: userId
+      });
+    });
+  },
+
+  deleteUser(req, res) {
+    const id = req.params.id;
+    const loggedUser = req.session.user;
+
+    if (!loggedUser || loggedUser.role !== 'admin') {
+      return res.status(403).send('Forbidden');
+    }
+
+    // Prevent admin from deleting their own account via this page (optional safety)
+    if (parseInt(id, 10) === loggedUser.id) {
+      req.flash('error', 'You cannot delete your own admin account here.');
+      return res.redirect('/admin/users');
+    }
+
+    User.deleteById(id, (err) => {
+      if (err) {
+        console.error(err);
+        req.flash('error', 'Could not delete user account');
+      } else {
+        req.flash('success', 'User account deleted successfully');
+      }
+      res.redirect('/admin/users');
+    });
+  },
+
   logout(req, res) {
     req.session.destroy(() => res.redirect('/login'));
   }

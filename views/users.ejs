@@ -52,9 +52,13 @@
                       <% } %>
                     </td>
                     <td>
-                      <a href="/admin/users/<%= u.id %>/edit" class="btn btn-sm btn-outline-primary">
-                        Edit role
-                      </a>
+                      <div class="btn-group btn-group-sm" role="group">
+                        <a href="/admin/users/<%= u.id %>/history" class="btn btn-outline-secondary">History</a>
+                        <a href="/admin/users/<%= u.id %>/edit" class="btn btn-outline-primary">Edit</a>
+                        <form action="/admin/users/<%= u.id %>/delete" method="POST" onsubmit="return confirm('Delete this account? This action cannot be undone.');">
+                          <button class="btn btn-outline-danger" type="submit">Delete</button>
+                        </form>
+                      </div>
                     </td>
                   </tr>
                 <% }) %>

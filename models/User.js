@@ -35,6 +35,15 @@ const User = {
     });
   },
 
+
+  deleteById(id, callback) {
+    const sql = 'DELETE FROM users WHERE id = ?';
+    db.query(sql, [id], (err, result) => {
+      if (err) return callback(err);
+      return callback(null, result);
+    });
+  },
+
   updateRole(id, role, callback) {
     const sql = 'UPDATE users SET role = ? WHERE id = ?';
     db.query(sql, [role, id], (err, result) => {
