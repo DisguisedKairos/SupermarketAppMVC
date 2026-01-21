@@ -10,13 +10,15 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "axios": "^1.6.0",
+    "connect-flash": "*",
+    "dotenv": "*",
     "ejs": "^3.1.10",
     "express": "^5.1.0",
+    "express-session": "*",
     "multer": "^2.0.1",
     "mysql2": "^3.14.1",
-    "nodemon": "^3.1.10",
-    "express-session": "*",
-    "connect-flash": "*",
-    "dotenv": "*"
+    "node-fetch": "^2.7.0",
+    "nodemon": "^3.1.10"
   }
 }

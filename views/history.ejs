@@ -52,6 +52,8 @@
                 <th scope="col">Subtotal</th>
                 <th scope="col">Tax</th>
                 <th scope="col">Total</th>
+                <th scope="col">Status</th>
+                <th scope="col">Payment</th>
                 <th scope="col">Created At</th>
                 <% if (!viewedUserId) { %>
                   <th scope="col">Actions</th>
@@ -67,6 +69,8 @@
                     <td>$<%= (inv.subtotal || inv.totalAmount || 0).toFixed ? inv.subtotal.toFixed(2) : inv.subtotal %></td>
                     <td>$<%= (inv.tax || 0).toFixed ? inv.tax.toFixed(2) : inv.tax %></td>
                     <td>$<%= (inv.totalAmount || 0).toFixed ? inv.totalAmount.toFixed(2) : inv.totalAmount %></td>
+                    <td><%= inv.status || '' %></td>
+                    <td><%= inv.paymentMethod || '' %></td>
                     <td><%= inv.createdAt %></td>
                     <% if (!viewedUserId) { %>
                       <td>
@@ -79,7 +83,7 @@
                 <% }) %>
               <% } else { %>
                 <tr>
-                  <td colspan="6" class="text-center py-4">
+                  <td colspan="8" class="text-center py-4">
                     No invoices found.
                   </td>
                 </tr>

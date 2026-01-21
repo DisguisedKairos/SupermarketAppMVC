@@ -118,8 +118,26 @@ app.post('/cart/clear', checkAuthenticated, CartController.clear);
 app.post('/checkout', checkAuthenticated, InvoiceController.checkout);
 app.get('/payment', checkAuthenticated, InvoiceController.paymentForm);
 app.post('/payment', checkAuthenticated, InvoiceController.processPayment);
+
+// PayPal JS SDK endpoints (slides)
+app.post('/api/paypal/create-order', checkAuthenticated, express.json(), InvoiceController.paypalApiCreateOrder);
+app.post('/api/paypal/capture-order', checkAuthenticated, express.json(), InvoiceController.paypalApiCaptureOrder);
+
+// NETS QR (slides) - SSE status endpoint
+app.get('/sse/payment-status/:txnRetrievalRef', checkAuthenticated, InvoiceController.netsSsePaymentStatus);
+app.get('/netsqr/fail/:invoiceId', checkAuthenticated, InvoiceController.netsQrFailPage);
 app.get('/invoice/:id', checkAuthenticated, InvoiceController.view);
 app.get('/history', checkAuthenticated, InvoiceController.history);
+// PayPal routes
+app.post('/paypal/create-order', checkAuthenticated, InvoiceController.paypalCreateOrder);
+app.get('/paypal/return', checkAuthenticated, InvoiceController.paypalReturn);
+app.get('/paypal/cancel', checkAuthenticated, InvoiceController.paypalCancel);
+
+// NETS QR routes
+app.get('/netsqr/pay/:invoiceId', checkAuthenticated, InvoiceController.netsQrPayPage);
+app.get('/netsqr/status/:invoiceId', checkAuthenticated, InvoiceController.netsQrStatus);
+app.post('/netsqr/webhook', express.json({ type: '*/*' }), InvoiceController.netsQrWebhook);
+
 
 // Start server
 const PORT = process.env.PORT || 3000;

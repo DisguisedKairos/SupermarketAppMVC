@@ -28,6 +28,12 @@
         <% if (typeof paymentMethod !== 'undefined' && paymentMethod) { %>
           <p class="mb-2"><strong>Payment Method:</strong> <%= paymentMethod %></p>
         <% } %>
+        <% if (header && header.status) { %>
+          <p class="mb-2"><strong>Status:</strong> <%= header.status %></p>
+        <% } %>
+        <% if (header && header.paidAt) { %>
+          <p class="mb-2"><strong>Paid At:</strong> <%= new Date(header.paidAt).toLocaleString() %></p>
+        <% } %>
         <p class="mb-1"><strong>Invoice ID:</strong> <%= header.id %></p>
         <p class="mb-1"><strong>Date:</strong>
           <% const created = header.createdAt instanceof Date ? header.createdAt : new Date(header.createdAt); %>

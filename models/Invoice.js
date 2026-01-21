@@ -11,7 +11,11 @@ const Invoice = {
    * - Clears the cart
    * - Returns header + items for rendering
    */
-  createFromCart(userId, callback) {
+  createFromCart(userId, paymentMethod, callback) {
+    if (typeof paymentMethod === 'function') {
+      callback = paymentMethod;
+      paymentMethod = null;
+    }
     const cartSql = `
       SELECT
         c.productId,
@@ -57,9 +61,9 @@ const Invoice = {
       const total = parseFloat((subtotal + tax).toFixed(2));
 
       // Insert invoice header
-      const invSql =
-        'INSERT INTO invoice (userId, subtotal, tax, totalAmount) VALUES (?, ?, ?, ?)';
-      db.query(invSql, [userId, subtotal, tax, total], (err2, result) => {
+      const invSql = `INSERT INTO invoice (userId, subtotal, tax, totalAmount, createdAt, status, paymentMethod, paidAt)
+        VALUES (?, ?, ?, ?, NOW(), 'PAID', ?, NOW())`;
+      db.query(invSql, [userId, subtotal, tax, total, paymentMethod], (err2, result) => {
         if (err2) return callback(err2);
         const invoiceId = result.insertId;
 
@@ -90,7 +94,7 @@ const Invoice = {
 
                 // Load fresh header for return
                 const headerSql =
-                  'SELECT id, userId, subtotal, tax, totalAmount, createdAt FROM invoice WHERE id = ?';
+                  'SELECT id, userId, subtotal, tax, totalAmount, createdAt, status, paymentMethod, provider, providerRef, paidAt FROM invoice WHERE id = ?';
                 db.query(headerSql, [invoiceId], (err5, rows) => {
                   if (err5) return callback(err5);
                   const header =
@@ -129,9 +133,234 @@ const Invoice = {
     });
   },
 
-  getById(id, userId, callback) {
+  
+  /**
+   * Create an invoice from cart but keep it in PENDING_PAYMENT status.
+   * - Validates cart is not empty
+   * - Validates stock availability at the moment of creation
+   * - Inserts into `invoice` and `invoice_items`
+   * - DOES NOT deduct stock
+   * - DOES NOT clear cart
+   *
+   * Returns { header, items } (header includes new invoice id)
+   */
+  createPendingFromCart(userId, paymentMethod, callback) {
+    const cartSql = `
+      SELECT
+        c.id as cartId,
+        c.productId,
+        p.productName as productName,
+        p.price,
+        c.quantity,
+        p.quantity as stockQty
+      FROM cart c
+      JOIN products p ON p.id = c.productId
+      WHERE c.userId = ?
+      ORDER BY c.id ASC
+    `;
+
+    db.query(cartSql, [userId], (err, items) => {
+      if (err) return callback(err);
+      if (!items || items.length === 0) {
+        return callback(new Error('Your cart is empty.'));
+      }
+
+      // Validate stock
+      for (const it of items) {
+        const qty = parseInt(it.quantity, 10) || 0;
+        const stock = parseInt(it.stockQty, 10) || 0;
+        if (qty <= 0) return callback(new Error('Invalid quantity in cart.'));
+        if (qty > stock) {
+          return callback(new Error(`Not enough stock for ${it.productName}. Available: ${stock}`));
+        }
+      }
+
+      const subtotal = items.reduce((sum, it) => sum + (parseFloat(it.price) || 0) * (parseInt(it.quantity, 10) || 0), 0);
+      const taxRate = 0;
+      const tax = 0;
+      const totalAmount = subtotal;
+
+      db.beginTransaction((txErr) => {
+        if (txErr) return callback(txErr);
+
+        const headerSql = `
+          INSERT INTO invoice (userId, subtotal, tax, totalAmount, createdAt, status, paymentMethod)
+          VALUES (?, ?, ?, ?, NOW(), 'PENDING_PAYMENT', ?)
+        `;
+        db.query(headerSql, [userId, subtotal, tax, totalAmount, paymentMethod], (errH, resultH) => {
+          if (errH) {
+            return db.rollback(() => callback(errH));
+          }
+          const invoiceId = resultH.insertId;
+
+          const itemSql = `
+            INSERT INTO invoice_items (invoiceId, productId, productName, quantity, price)
+            VALUES ?
+          `;
+          const values = items.map((it) => [
+            invoiceId,
+            it.productId,
+            it.productName,
+            parseInt(it.quantity, 10) || 0,
+            parseFloat(it.price) || 0,
+          ]);
+
+          db.query(itemSql, [values], (errI) => {
+            if (errI) {
+              return db.rollback(() => callback(errI));
+            }
+
+            db.commit((errC) => {
+              if (errC) return db.rollback(() => callback(errC));
+
+              const header = {
+                id: invoiceId,
+                userId,
+                subtotal,
+                tax,
+                totalAmount,
+                createdAt: new Date(),
+                status: 'PENDING_PAYMENT',
+                paymentMethod,
+              };
+
+              // Normalize item fields for EJS
+              const normalizedItems = items.map((it) => ({
+                productId: it.productId,
+                productName: it.productName,
+                quantity: parseInt(it.quantity, 10) || 0,
+                price: parseFloat(it.price) || 0,
+              }));
+
+              return callback(null, { header, items: normalizedItems });
+            });
+          });
+        });
+      });
+    });
+  },
+
+  /**
+   * Mark invoice as PAID and finalize stock deduction + cart clear atomically.
+   * This re-validates stock at the time of payment finalization.
+   */
+  markPaid({ invoiceId, userId, paymentMethod, provider, providerRef }, callback) {
+    db.beginTransaction((txErr) => {
+      if (txErr) return callback(txErr);
+
+      const loadItemsSql = 'SELECT productId, quantity FROM invoice_items WHERE invoiceId = ?';
+      db.query(loadItemsSql, [invoiceId], (errItems, invItems) => {
+        if (errItems) return db.rollback(() => callback(errItems));
+        if (!invItems || invItems.length === 0) {
+          return db.rollback(() => callback(new Error('Invoice items not found.')));
+        }
+
+        // Re-check stock for each item
+        const checkNext = (i) => {
+          if (i >= invItems.length) return deductNext(0);
+
+          const it = invItems[i];
+          const qty = parseInt(it.quantity, 10) || 0;
+          db.query('SELECT quantity FROM products WHERE id = ?', [it.productId], (errQ, rows) => {
+            if (errQ) return db.rollback(() => callback(errQ));
+            const stock = rows && rows[0] ? parseInt(rows[0].quantity, 10) || 0 : 0;
+            if (qty > stock) {
+              return db.rollback(() => callback(new Error('Not enough stock to complete payment. Please try again.')));
+            }
+            return checkNext(i + 1);
+          });
+        };
+
+        const deductNext = (i) => {
+          if (i >= invItems.length) return finalizeInvoice();
+
+          const it = invItems[i];
+          const qty = parseInt(it.quantity, 10) || 0;
+          db.query('UPDATE products SET quantity = quantity - ? WHERE id = ?', [qty, it.productId], (errU) => {
+            if (errU) return db.rollback(() => callback(errU));
+            return deductNext(i + 1);
+          });
+        };
+
+        const finalizeInvoice = () => {
+          const updateSql = `
+            UPDATE invoice
+            SET status='PAID',
+                paymentMethod = ?,
+                provider = ?,
+                providerRef = ?,
+                paidAt = NOW()
+            WHERE id = ? AND userId = ?
+          `;
+          db.query(updateSql, [paymentMethod, provider || null, providerRef || null, invoiceId, userId], (errUp) => {
+            if (errUp) return db.rollback(() => callback(errUp));
+
+            // Clear cart only after invoice is paid
+            db.query('DELETE FROM cart WHERE userId = ?', [userId], (errClr) => {
+              if (errClr) return db.rollback(() => callback(errClr));
+
+              db.commit((errC) => {
+                if (errC) return db.rollback(() => callback(errC));
+                return callback(null, true);
+              });
+            });
+          });
+        };
+
+        return checkNext(0);
+      });
+    });
+  },
+
+  markCancelled({ invoiceId, userId, reason }, callback) {
+    const sql = `
+      UPDATE invoice
+      SET status='CANCELLED'
+      WHERE id = ? AND userId = ?
+    `;
+    db.query(sql, [invoiceId, userId], (err) => {
+      if (err) return callback(err);
+      return callback(null, true);
+    });
+  },
+
+  updateProviderMeta({ invoiceId, userId, provider, providerRef }, callback) {
+    const sql = `
+      UPDATE invoice
+      SET provider = ?, providerRef = ?
+      WHERE id = ? AND userId = ?
+    `;
+    db.query(sql, [provider || null, providerRef || null, invoiceId, userId], (err) => {
+      if (err) return callback(err);
+      return callback(null, true);
+    });
+  },
+
+  /**
+   * Lookup invoice by provider + providerRef.
+   * Useful for NETS SSE reconciliation using txn_retrieval_ref.
+   */
+  findByProviderRef(provider, providerRef, callback) {
+    const sql = 'SELECT id, userId, status, paymentMethod, provider, providerRef FROM invoice WHERE provider = ? AND providerRef = ? LIMIT 1';
+    db.query(sql, [provider, providerRef], (err, rows) => {
+      if (err) return callback(err);
+      if (!rows || rows.length === 0) return callback(new Error('Invoice not found for provider reference'));
+      return callback(null, rows[0]);
+    });
+  },
+
+  getStatus(invoiceId, userId, callback) {
+    const sql = 'SELECT id, status, paymentMethod, provider, providerRef, paidAt FROM invoice WHERE id = ? AND userId = ?';
+    db.query(sql, [invoiceId, userId], (err, rows) => {
+      if (err) return callback(err);
+      if (!rows || rows.length === 0) return callback(new Error('Invoice not found'));
+      return callback(null, rows[0]);
+    });
+  },
+
+getById(id, userId, callback) {
     const headerSql =
-      'SELECT id, userId, subtotal, tax, totalAmount, createdAt FROM invoice WHERE id = ? AND userId = ?';
+      'SELECT id, userId, subtotal, tax, totalAmount, createdAt, status, paymentMethod, provider, providerRef, paidAt, status, paymentMethod, provider, providerRef, paidAt FROM invoice WHERE id = ? AND userId = ?';
     db.query(headerSql, [id, userId], (err, results) => {
       if (err) return callback(err);
       if (!results || results.length === 0) {
@@ -150,7 +379,7 @@ const Invoice = {
 
   listByUser(userId, callback) {
     const sql = `
-      SELECT id, userId, subtotal, tax, totalAmount, createdAt
+      SELECT id, userId, subtotal, tax, totalAmount, createdAt, status, paymentMethod, provider, providerRef, paidAt
       FROM invoice
       WHERE userId = ?
       ORDER BY createdAt DESC, id DESC
