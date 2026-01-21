@@ -2,6 +2,16 @@
 const db = require('../db');
 
 const Invoice = {
+  addStatusHistory({ invoiceId, status, note, actorUserId, actorRole }, callback) {
+    const sql = `
+      INSERT INTO invoice_status_history (invoiceId, status, note, actorUserId, actorRole)
+      VALUES (?, ?, ?, ?, ?)
+    `;
+    db.query(sql, [invoiceId, status, note || null, actorUserId || null, actorRole || null], (err) => {
+      if (err) return callback ? callback(err) : null;
+      return callback ? callback(null, true) : null;
+    });
+  },
   /**
    * Create an invoice from the current user's cart.
    * - Validates that cart is not empty
@@ -109,6 +119,10 @@ const Invoice = {
                           createdAt: new Date(),
                         };
 
+                  Invoice.addStatusHistory(
+                    { invoiceId, status: 'PAID', note: 'Invoice paid at checkout', actorUserId: userId, actorRole: 'user' },
+                    () => {}
+                  );
                   return callback(null, { header, items });
                 });
               });
@@ -232,6 +246,10 @@ const Invoice = {
                 price: parseFloat(it.price) || 0,
               }));
 
+              Invoice.addStatusHistory(
+                { invoiceId, status: 'PENDING_PAYMENT', note: 'Invoice created, awaiting payment', actorUserId: userId, actorRole: 'user' },
+                () => {}
+              );
               return callback(null, { header, items: normalizedItems });
             });
           });
@@ -301,6 +319,10 @@ const Invoice = {
 
               db.commit((errC) => {
                 if (errC) return db.rollback(() => callback(errC));
+                Invoice.addStatusHistory(
+                  { invoiceId, status: 'PAID', note: 'Payment completed', actorUserId: userId, actorRole: 'user' },
+                  () => {}
+                );
                 return callback(null, true);
               });
             });
@@ -320,7 +342,109 @@ const Invoice = {
     `;
     db.query(sql, [invoiceId, userId], (err) => {
       if (err) return callback(err);
+      Invoice.addStatusHistory(
+        { invoiceId, status: 'CANCELLED', note: reason || 'Payment cancelled', actorUserId: userId, actorRole: 'user' },
+        () => {}
+      );
       return callback(null, true);
+    });
+  },
+
+  markVoided({ invoiceId, adminUserId, reason }, callback) {
+    const sql = `
+      UPDATE invoice
+      SET status='VOIDED',
+          voidedAt = NOW()
+      WHERE id = ? AND status = 'PENDING_PAYMENT'
+    `;
+    db.query(sql, [invoiceId], (err, result) => {
+      if (err) return callback(err);
+      if (!result || result.affectedRows === 0) {
+        return callback(new Error('Invoice cannot be voided in its current status.'));
+      }
+      Invoice.addStatusHistory(
+        { invoiceId, status: 'VOIDED', note: reason || 'Payment voided by admin', actorUserId: adminUserId, actorRole: 'admin' },
+        () => {}
+      );
+      return callback(null, true);
+    });
+  },
+
+  refund({ invoiceId, adminUserId, amount, reason }, callback) {
+    const loadSql = `
+      SELECT id, userId, totalAmount, refundedAmount, status
+      FROM invoice
+      WHERE id = ?
+      LIMIT 1
+    `;
+    db.query(loadSql, [invoiceId], (err, rows) => {
+      if (err) return callback(err);
+      if (!rows || rows.length === 0) return callback(new Error('Invoice not found.'));
+
+      const inv = rows[0];
+      const currentStatus = inv.status;
+      if (currentStatus !== 'PAID' && currentStatus !== 'PARTIALLY_REFUNDED') {
+        return callback(new Error('Invoice is not eligible for refund.'));
+      }
+
+      const totalAmount = parseFloat(inv.totalAmount) || 0;
+      const refundedAmount = parseFloat(inv.refundedAmount) || 0;
+      const remaining = parseFloat((totalAmount - refundedAmount).toFixed(2));
+      const reqAmount = parseFloat(amount);
+
+      if (!Number.isFinite(reqAmount) || reqAmount <= 0) {
+        return callback(new Error('Refund amount must be greater than 0.'));
+      }
+      if (reqAmount > remaining) {
+        return callback(new Error(`Refund amount exceeds remaining balance (${remaining.toFixed(2)}).`));
+      }
+
+      const newRefunded = parseFloat((refundedAmount + reqAmount).toFixed(2));
+      const isFull = newRefunded >= totalAmount;
+      const newStatus = isFull ? 'REFUNDED' : 'PARTIALLY_REFUNDED';
+      const refundStatus = isFull ? 'FULL' : 'PARTIAL';
+
+      db.beginTransaction((txErr) => {
+        if (txErr) return callback(txErr);
+
+        const refundSql = `
+          INSERT INTO invoice_refunds (invoiceId, amount, reason, createdByUserId)
+          VALUES (?, ?, ?, ?)
+        `;
+        db.query(refundSql, [invoiceId, reqAmount, reason || null, adminUserId || null], (errR) => {
+          if (errR) {
+            return db.rollback(() => callback(errR));
+          }
+
+          const updateSql = `
+            UPDATE invoice
+            SET refundedAmount = ?,
+                refundStatus = ?,
+                status = ?
+            WHERE id = ?
+          `;
+          db.query(updateSql, [newRefunded, refundStatus, newStatus, invoiceId], (errU) => {
+            if (errU) {
+              return db.rollback(() => callback(errU));
+            }
+
+            db.commit((errC) => {
+              if (errC) return db.rollback(() => callback(errC));
+              Invoice.addStatusHistory(
+                {
+                  invoiceId,
+                  status: newStatus,
+                  note: reason || `Refunded ${reqAmount.toFixed(2)}`,
+                  actorUserId: adminUserId,
+                  actorRole: 'admin',
+                },
+                () => {}
+              );
+              return callback(null, true);
+            });
+          });
+        });
+      });
     });
   },
 
@@ -350,7 +474,7 @@ const Invoice = {
   },
 
   getStatus(invoiceId, userId, callback) {
-    const sql = 'SELECT id, status, paymentMethod, provider, providerRef, paidAt FROM invoice WHERE id = ? AND userId = ?';
+    const sql = 'SELECT id, status, paymentMethod, provider, providerRef, paidAt, refundedAmount, refundStatus, voidedAt FROM invoice WHERE id = ? AND userId = ?';
     db.query(sql, [invoiceId, userId], (err, rows) => {
       if (err) return callback(err);
       if (!rows || rows.length === 0) return callback(new Error('Invoice not found'));
@@ -360,7 +484,7 @@ const Invoice = {
 
 getById(id, userId, callback) {
     const headerSql =
-      'SELECT id, userId, subtotal, tax, totalAmount, createdAt, status, paymentMethod, provider, providerRef, paidAt, status, paymentMethod, provider, providerRef, paidAt FROM invoice WHERE id = ? AND userId = ?';
+      'SELECT id, userId, subtotal, tax, totalAmount, createdAt, status, paymentMethod, provider, providerRef, paidAt, refundedAmount, refundStatus, voidedAt FROM invoice WHERE id = ? AND userId = ?';
     db.query(headerSql, [id, userId], (err, results) => {
       if (err) return callback(err);
       if (!results || results.length === 0) {
@@ -372,14 +496,32 @@ getById(id, userId, callback) {
         'SELECT productId, productName, quantity, price FROM invoice_items WHERE invoiceId = ?';
       db.query(itemsSql, [id], (err2, items) => {
         if (err2) return callback(err2);
-        return callback(null, { header, items });
+        const historySql = `
+          SELECT status, note, actorUserId, actorRole, createdAt
+          FROM invoice_status_history
+          WHERE invoiceId = ?
+          ORDER BY createdAt ASC, id ASC
+        `;
+        db.query(historySql, [id], (errH, historyRows) => {
+          if (errH) return callback(errH);
+          const refundsSql = `
+            SELECT amount, reason, createdAt, createdByUserId
+            FROM invoice_refunds
+            WHERE invoiceId = ?
+            ORDER BY createdAt ASC, id ASC
+          `;
+          db.query(refundsSql, [id], (errR, refundRows) => {
+            if (errR) return callback(errR);
+            return callback(null, { header, items, history: historyRows || [], refunds: refundRows || [] });
+          });
+        });
       });
     });
   },
 
   listByUser(userId, callback) {
     const sql = `
-      SELECT id, userId, subtotal, tax, totalAmount, createdAt, status, paymentMethod, provider, providerRef, paidAt
+      SELECT id, userId, subtotal, tax, totalAmount, createdAt, status, paymentMethod, provider, providerRef, paidAt, refundedAmount, refundStatus, voidedAt
       FROM invoice
       WHERE userId = ?
       ORDER BY createdAt DESC, id DESC
@@ -391,6 +533,7 @@ getById(id, userId, callback) {
         subtotal: parseFloat(row.subtotal) || 0,
         tax: parseFloat(row.tax) || 0,
         totalAmount: parseFloat(row.totalAmount) || 0,
+        refundedAmount: parseFloat(row.refundedAmount) || 0,
       }));
       return callback(null, invoices);
     });

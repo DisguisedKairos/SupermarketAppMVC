@@ -39,26 +39,10 @@
             <form method="POST" action="/payment">
               <div class="list-group mb-3">
                 <label class="list-group-item d-flex gap-3 align-items-center">
-                  <input class="form-check-input" type="radio" name="paymentMethod" value="Card" <%= selectedMethod === 'Card' ? 'checked' : '' %> required>
+                  <input class="form-check-input" type="radio" name="paymentMethod" value="Stripe" <%= selectedMethod === 'Stripe' ? 'checked' : '' %> required>
                   <div>
-                    <div class="fw-semibold">Credit / Debit Card</div>
-                    <small class="text-muted">Visa, MasterCard, AMEX</small>
-                  </div>
-                </label>
-
-                <label class="list-group-item d-flex gap-3 align-items-center">
-                  <input class="form-check-input" type="radio" name="paymentMethod" value="PayNow" <%= selectedMethod === 'PayNow' ? 'checked' : '' %>>
-                  <div>
-                    <div class="fw-semibold">PayNow / QR</div>
-                    <small class="text-muted">Instant transfer via bank app</small>
-                  </div>
-                </label>
-
-                <label class="list-group-item d-flex gap-3 align-items-center">
-                  <input class="form-check-input" type="radio" name="paymentMethod" value="GrabPay" <%= selectedMethod === 'GrabPay' ? 'checked' : '' %>>
-                  <div>
-                    <div class="fw-semibold">GrabPay</div>
-                    <small class="text-muted">Pay using Grab wallet</small>
+                    <div class="fw-semibold">Stripe</div>
+                    <small class="text-muted">Card payment via Stripe</small>
                   </div>
                 </label>
 

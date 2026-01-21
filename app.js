@@ -97,6 +97,8 @@ app.get('/deleteProduct/:id', checkAuthenticated, checkAdmin, ProductController.
 app.get('/admin/users', checkAuthenticated, checkAdmin, AuthController.listUsers);
 app.get('/admin/users/:id/edit', checkAuthenticated, checkAdmin, AuthController.editUserForm);
 app.post('/admin/users/:id/edit', checkAuthenticated, checkAdmin, AuthController.updateUser);
+app.post('/admin/invoices/:id/void', checkAuthenticated, checkAdmin, InvoiceController.adminVoid);
+app.post('/admin/invoices/:id/refund', checkAuthenticated, checkAdmin, InvoiceController.adminRefund);
 
 
 // Wishlist routes
@@ -123,6 +125,40 @@ app.post('/payment', checkAuthenticated, InvoiceController.processPayment);
 app.post('/api/paypal/create-order', checkAuthenticated, express.json(), InvoiceController.paypalApiCreateOrder);
 app.post('/api/paypal/capture-order', checkAuthenticated, express.json(), InvoiceController.paypalApiCaptureOrder);
 
+
+// NETS QR demo-compatible endpoints (Generate QR and status pages)
+const netsQrService = require('./services/nets');
+app.post('/generateNETSQR', checkAuthenticated, express.urlencoded({ extended: true }), (req, res) => netsQrService.generateQrCode(req, res));
+app.get('/nets-qr/success', checkAuthenticated, (req, res) => {
+  const user = req.session.user;
+  const txnRetrievalRef = (req.query.txn_retrieval_ref || '').trim();
+
+  if (!txnRetrievalRef) {
+    return res.render('netsTxnSuccessStatus', {
+      message: 'Transaction Successful!',
+      invoiceId: null,
+      paymentMethod: null
+    });
+  }
+
+  Invoice.findByProviderRef('NETSQR', txnRetrievalRef, (err, row) => {
+    if (err || !row || row.userId !== user.id) {
+      return res.render('netsTxnSuccessStatus', {
+        message: 'Transaction Successful!',
+        invoiceId: null,
+        paymentMethod: null
+      });
+    }
+
+    return res.render('netsTxnSuccessStatus', {
+      message: 'Transaction Successful!',
+      invoiceId: row.id,
+      paymentMethod: row.paymentMethod || null
+    });
+  });
+});
+app.get('/nets-qr/fail', checkAuthenticated, (req, res) => res.render('netsTxnFailStatus', { message: 'Transaction Failed. Please try again.' }));
+
 // NETS QR (slides) - SSE status endpoint
 app.get('/sse/payment-status/:txnRetrievalRef', checkAuthenticated, InvoiceController.netsSsePaymentStatus);
 app.get('/netsqr/fail/:invoiceId', checkAuthenticated, InvoiceController.netsQrFailPage);
@@ -132,6 +168,10 @@ app.get('/history', checkAuthenticated, InvoiceController.history);
 app.post('/paypal/create-order', checkAuthenticated, InvoiceController.paypalCreateOrder);
 app.get('/paypal/return', checkAuthenticated, InvoiceController.paypalReturn);
 app.get('/paypal/cancel', checkAuthenticated, InvoiceController.paypalCancel);
+
+// Stripe routes
+app.get('/stripe/success', checkAuthenticated, InvoiceController.stripeSuccess);
+app.get('/stripe/cancel', checkAuthenticated, InvoiceController.stripeCancel);
 
 // NETS QR routes
 app.get('/netsqr/pay/:invoiceId', checkAuthenticated, InvoiceController.netsQrPayPage);

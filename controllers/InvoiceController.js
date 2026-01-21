@@ -43,14 +43,14 @@ const InvoiceController = {
     const user = req.session.user;
     const method = (req.body.paymentMethod || '').trim();
 
-    const allowedMethods = ['Card', 'PayNow', 'GrabPay', 'Cash', 'PayPal', 'NETSQR'];
+    const allowedMethods = ['Stripe', 'Cash', 'PayPal', 'NETSQR'];
     if (!allowedMethods.includes(method)) {
       req.flash('error', 'Please choose a valid payment method.');
       return res.redirect('/payment');
     }
 
     // For offline methods, we treat payment as immediate
-    const isImmediate = ['Card', 'PayNow', 'GrabPay', 'Cash'].includes(method);
+    const isImmediate = ['Cash'].includes(method);
 
     if (isImmediate) {
       req.session.paymentMethod = method;
@@ -101,12 +101,36 @@ const InvoiceController = {
           });
         }
 
+        if (method === 'Stripe') {
+          const stripe = require('../services/stripe');
+          const amount = parseFloat(data.header.totalAmount) || 0;
+
+          const session = await stripe.createCheckoutSession({
+            amount,
+            invoiceId,
+            userId: user.id,
+          });
+
+          if (!session || !session.id || !session.url) {
+            throw new Error('Stripe did not return a valid checkout session.');
+          }
+
+          return Invoice.updateProviderMeta(
+            { invoiceId, userId: user.id, provider: 'STRIPE', providerRef: session.id },
+            (errUp) => {
+              if (errUp) console.error('Failed to store Stripe meta:', errUp.message);
+              return res.redirect(session.url);
+            }
+          );
+        }
+
         if (method === 'NETSQR') {
           const crypto = require('crypto');
           const nets = require('../services/nets');
 
-          // Match the slide format: sandbox_nets|m|<uuid>
-          const txnId = `sandbox_nets|m|${crypto.randomUUID()}`;
+          // Use a static txn id if configured (helps match Postman testing).
+          const staticTxnId = (process.env.NETS_TXN_ID || '').trim();
+          const txnId = staticTxnId || `sandbox_nets|m|${crypto.randomUUID()}`;
           const amount = parseFloat(data.header.totalAmount) || 0;
 
           const qr = await nets.requestQr({
@@ -133,6 +157,7 @@ const InvoiceController = {
                 txnRetrievalRef: qr.txnRetrievalRef,
                 apiKey: process.env.NETS_API_KEY || process.env.API_KEY || '',
                 projectId: process.env.NETS_PROJECT_ID || process.env.PROJECT_ID || '',
+                courseInitId: (() => { try { return require('../course_init_id').courseInitId || ''; } catch(_) { return ''; } })(),
                 fullNetsResponse: qr.raw || {},
               });
             }
@@ -169,6 +194,7 @@ const InvoiceController = {
       invoice.header.subtotal = parseFloat(invoice.header.subtotal) || 0;
       invoice.header.tax = parseFloat(invoice.header.tax) || 0;
       invoice.header.totalAmount = parseFloat(invoice.header.totalAmount) || 0;
+      invoice.header.refundedAmount = parseFloat(invoice.header.refundedAmount) || 0;
       invoice.items = (invoice.items || []).map(it => ({
         ...it,
         price: parseFloat(it.price) || 0,
@@ -179,7 +205,9 @@ const InvoiceController = {
         user,
         header: invoice.header,
         items: invoice.items,
-        paymentMethod: invoice.header.paymentMethod || req.session.paymentMethod || ''
+        paymentMethod: invoice.header.paymentMethod || req.session.paymentMethod || '',
+        statusHistory: invoice.history || [],
+        refunds: invoice.refunds || []
       });
     });
   }
@@ -362,6 +390,64 @@ const InvoiceController = {
       Invoice.markCancelled({ invoiceId, userId: user.id, reason: 'User cancelled PayPal checkout' }, () => {});
     }
     req.flash('error', 'PayPal payment cancelled.');
+    return res.redirect('/payment');
+  },
+
+  // GET /stripe/success?session_id=cs_test_...
+  async stripeSuccess(req, res) {
+    const user = req.session.user;
+    const sessionId = req.query.session_id;
+    if (!sessionId) {
+      req.flash('error', 'Missing Stripe session id.');
+      return res.redirect('/payment');
+    }
+
+    try {
+      const stripe = require('../services/stripe');
+      const session = await stripe.retrieveCheckoutSession(sessionId);
+
+      if (!session || session.payment_status !== 'paid') {
+        req.flash('error', 'Stripe payment is not completed.');
+        return res.redirect('/payment');
+      }
+
+      Invoice.findByProviderRef('STRIPE', sessionId, (err, row) => {
+        if (err || !row) {
+          req.flash('error', 'Stripe payment was received but invoice was not found.');
+          return res.redirect('/payment');
+        }
+        if (row.userId !== user.id) {
+          req.flash('error', 'Stripe invoice user mismatch.');
+          return res.redirect('/payment');
+        }
+
+        Invoice.markPaid(
+          { invoiceId: row.id, userId: user.id, paymentMethod: 'Stripe', provider: 'STRIPE', providerRef: sessionId },
+          (markErr) => {
+            if (markErr) {
+              req.flash('error', markErr.message || 'Could not finalize Stripe payment.');
+              return res.redirect('/payment');
+            }
+            req.flash('success', 'Payment successful!');
+            return res.redirect(`/invoice/${row.id}`);
+          }
+        );
+      });
+    } catch (e) {
+      console.error('Stripe success error:', e);
+      req.flash('error', e.message || 'Stripe verification failed.');
+      return res.redirect('/payment');
+    }
+  },
+
+  // GET /stripe/cancel?invoiceId=123
+  stripeCancel(req, res) {
+    const user = req.session.user;
+    const invoiceId = parseInt(req.query.invoiceId, 10);
+    if (!Number.isNaN(invoiceId)) {
+      Invoice.markCancelled({ invoiceId, userId: user.id, reason: 'User cancelled Stripe checkout' }, () => {});
+    }
+    req.flash('error', 'Stripe payment cancelled.');
     return res.redirect('/payment');
   },
 
@@ -576,6 +662,59 @@ const InvoiceController = {
       console.error('NETS webhook error:', e);
       return res.status(200).json({ ok: true });
     }
+  },
+
+  // POST /admin/invoices/:id/void
+  adminVoid(req, res) {
+    const admin = req.session.user;
+    const invoiceId = parseInt(req.params.id, 10);
+    const reason = (req.body.reason || '').trim();
+    const targetUserId = parseInt(req.body.userId, 10);
+
+    if (!admin || admin.role !== 'admin') return res.status(403).send('Forbidden');
+    if (Number.isNaN(invoiceId)) {
+      req.flash('error', 'Invalid invoice id');
+      if (!Number.isNaN(targetUserId)) {
+        return res.redirect(`/admin/users/${targetUserId}/history`);
+      }
+      return res.redirect('/admin/users');
+    }
+
+    Invoice.markVoided({ invoiceId, adminUserId: admin.id, reason }, (err) => {
+      if (err) {
+        req.flash('error', err.message || 'Could not void invoice');
+        return res.redirect('/admin/users');
+      }
+      req.flash('success', 'Invoice voided.');
+      return res.redirect('/admin/users');
+    });
+  },
+
+  // POST /admin/invoices/:id/refund
+  adminRefund(req, res) {
+    const admin = req.session.user;
+    const invoiceId = parseInt(req.params.id, 10);
+    const amount = (req.body.amount || '').trim();
+    const reason = (req.body.reason || '').trim();
+    const targetUserId = parseInt(req.body.userId, 10);
+
+    if (!admin || admin.role !== 'admin') return res.status(403).send('Forbidden');
+    if (Number.isNaN(invoiceId)) {
+      req.flash('error', 'Invalid invoice id');
+      if (!Number.isNaN(targetUserId)) {
+        return res.redirect(`/admin/users/${targetUserId}/history`);
+      }
+      return res.redirect('/admin/users');
+    }
+
+    Invoice.refund({ invoiceId, adminUserId: admin.id, amount, reason }, (err) => {
+      if (err) {
+        req.flash('error', err.message || 'Could not refund invoice');
+        return res.redirect('/admin/users');
+      }
+      req.flash('success', 'Refund recorded.');
+      return res.redirect('/admin/users');
+    });
   },
 
 };

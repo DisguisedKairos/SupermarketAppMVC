@@ -54,8 +54,9 @@
                 <th scope="col">Total</th>
                 <th scope="col">Status</th>
                 <th scope="col">Payment</th>
+                <th scope="col">Refunded</th>
                 <th scope="col">Created At</th>
-                <% if (!viewedUserId) { %>
+                <% if (!viewedUserId || (user && user.role === 'admin')) { %>
                   <th scope="col">Actions</th>
                 <% } %>
               </tr>
@@ -71,19 +72,43 @@
                     <td>$<%= (inv.totalAmount || 0).toFixed ? inv.totalAmount.toFixed(2) : inv.totalAmount %></td>
                     <td><%= inv.status || '' %></td>
                     <td><%= inv.paymentMethod || '' %></td>
+                    <td>
+                      $<%= (inv.refundedAmount || 0).toFixed ? inv.refundedAmount.toFixed(2) : inv.refundedAmount %>
+                      (<%= inv.refundStatus || 'NONE' %>)
+                    </td>
                     <td><%= inv.createdAt %></td>
-                    <% if (!viewedUserId) { %>
+                    <% if (!viewedUserId || (user && user.role === 'admin')) { %>
                       <td>
-                        <a href="/invoice/<%= inv.id %>" class="btn btn-sm btn-outline-primary">
-                          View
-                        </a>
+                        <% if (!viewedUserId) { %>
+                          <a href="/invoice/<%= inv.id %>" class="btn btn-sm btn-outline-primary">
+                            View
+                          </a>
+                        <% } %>
+                        <% if (user && user.role === 'admin') { %>
+                          <% if (inv.status === 'PENDING_PAYMENT') { %>
+                            <form action="/admin/invoices/<%= inv.id %>/void" method="POST" class="d-inline">
+                              <input type="hidden" name="userId" value="<%= inv.userId %>">
+                              <input type="text" name="reason" class="form-control form-control-sm d-inline-block w-auto" placeholder="Void reason">
+                              <button class="btn btn-sm btn-outline-danger">Void</button>
+                            </form>
+                          <% } %>
+                          <% if (inv.status === 'PAID' || inv.status === 'PARTIALLY_REFUNDED') { %>
+                            <% const remaining = (parseFloat(inv.totalAmount) || 0) - (parseFloat(inv.refundedAmount) || 0); %>
+                            <form action="/admin/invoices/<%= inv.id %>/refund" method="POST" class="d-inline">
+                              <input type="hidden" name="userId" value="<%= inv.userId %>">
+                              <input type="number" step="0.01" min="0.01" max="<%= remaining.toFixed(2) %>" name="amount" class="form-control form-control-sm d-inline-block w-auto" value="<%= remaining.toFixed(2) %>">
+                              <input type="text" name="reason" class="form-control form-control-sm d-inline-block w-auto" placeholder="Refund reason">
+                              <button class="btn btn-sm btn-outline-warning">Refund</button>
+                            </form>
+                          <% } %>
+                        <% } %>
                       </td>
                     <% } %>
                   </tr>
                 <% }) %>
               <% } else { %>
                 <tr>
-                  <td colspan="8" class="text-center py-4">
+                  <td colspan="10" class="text-center py-4">
                     No invoices found.
                   </td>
                 </tr>

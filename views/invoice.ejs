@@ -34,6 +34,12 @@
         <% if (header && header.paidAt) { %>
           <p class="mb-2"><strong>Paid At:</strong> <%= new Date(header.paidAt).toLocaleString() %></p>
         <% } %>
+        <% if (header && header.refundStatus && header.refundStatus !== 'NONE') { %>
+          <p class="mb-2"><strong>Refund Status:</strong> <%= header.refundStatus %> ($<%= Number(header.refundedAmount || 0).toFixed(2) %>)</p>
+        <% } %>
+        <% if (header && header.voidedAt) { %>
+          <p class="mb-2"><strong>Voided At:</strong> <%= new Date(header.voidedAt).toLocaleString() %></p>
+        <% } %>
         <p class="mb-1"><strong>Invoice ID:</strong> <%= header.id %></p>
         <p class="mb-1"><strong>Date:</strong>
           <% const created = header.createdAt instanceof Date ? header.createdAt : new Date(header.createdAt); %>
@@ -85,6 +91,62 @@
         </div>
       </div>
     </div>
+
+    <% if (statusHistory && statusHistory.length) { %>
+      <div class="mt-4">
+        <h5 class="mb-2">Payment Status History</h5>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle bg-white shadow-sm">
+            <thead class="table-light">
+              <tr>
+                <th>Status</th>
+                <th>Note</th>
+                <th>Actor</th>
+                <th>Time</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% statusHistory.forEach(function(h) { %>
+                <tr>
+                  <td><%= h.status %></td>
+                  <td><%= h.note || '' %></td>
+                  <td><%= h.actorRole ? `${h.actorRole}#${h.actorUserId || ''}` : '' %></td>
+                  <td><%= new Date(h.createdAt).toLocaleString() %></td>
+                </tr>
+              <% }) %>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    <% } %>
+
+    <% if (refunds && refunds.length) { %>
+      <div class="mt-4">
+        <h5 class="mb-2">Refunds</h5>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle bg-white shadow-sm">
+            <thead class="table-light">
+              <tr>
+                <th>Amount</th>
+                <th>Reason</th>
+                <th>By</th>
+                <th>Time</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% refunds.forEach(function(r) { %>
+                <tr>
+                  <td>$<%= Number(r.amount || 0).toFixed(2) %></td>
+                  <td><%= r.reason || '' %></td>
+                  <td><%= r.createdByUserId ? `admin#${r.createdByUserId}` : '' %></td>
+                  <td><%= new Date(r.createdAt).toLocaleString() %></td>
+                </tr>
+              <% }) %>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    <% } %>
 
     <div class="mt-4 d-flex flex-wrap gap-2">
       <a href="/shopping" class="btn btn-primary">Continue Shopping</a>

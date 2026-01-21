@@ -9,6 +9,7 @@ This project integrates **PayPal Sandbox** and **NETS QR (OpenAPI PaaS via NETS 
 Run this SQL on your MySQL database:
 
 - `database/2026_payment_status_fields.sql`
+- `database/2026_payment_history_refunds.sql`
 
 ---
 
@@ -25,6 +26,10 @@ Create/update `.env`:
 - `PAYPAL_API=https://api-m.sandbox.paypal.com`
 - `PAYPAL_CLIENT_ID=...`
 - `PAYPAL_CLIENT_SECRET=...`
+
+### Stripe (Test)
+- `STRIPE_SECRET_KEY=...`
+- `STRIPE_PUBLISHABLE_KEY=...` (optional, only needed if you add a custom card form)
 
 ### NETS QR (Developer Portal / UAT)
 - `NETS_BASE_URL=https://sandbox.nets.openapipaas.com`
@@ -51,7 +56,15 @@ Headers (NETS portal):
    - `POST /api/paypal/capture-order` (server captures, marks invoice PAID)
 5. Browser redirects to `/invoice/:id`.
 
-### C) NETS QR (slides / Request+Query+SSE)
+### C) Stripe Checkout (hosted)
+1. User selects **Stripe** on `/payment`.
+2. App creates an invoice with status **PENDING_PAYMENT**.
+3. App creates a Stripe Checkout Session and redirects the browser to Stripe.
+4. Stripe redirects back to:
+   - Success: `/stripe/success?session_id=...`
+   - Cancel: `/stripe/cancel?invoiceId=...`
+
+### D) NETS QR (slides / Request+Query+SSE)
 1. User selects **NETSQR** on `/payment`.
 2. App creates an invoice with status **PENDING_PAYMENT**.
 3. App calls NETS **Request API** to get `qr_code` + `txn_retrieval_ref`.
