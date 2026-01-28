@@ -1,5 +1,6 @@
 const Invoice = require('../models/Invoice');
 const Cart = require('../models/Cart');
+const User = require('../models/User');
 
 const InvoiceController = {
   // POST /checkout -> go to payment page
@@ -26,14 +27,21 @@ const InvoiceController = {
       const tax = 0;
       const totalAmount = parseFloat((subtotal + tax).toFixed(2));
 
-      res.render('payment', {
-        user,
-        cart: items,
-        subtotal,
-        tax,
-        totalAmount,
-        selectedMethod: req.session.paymentMethod || '',
-        errors: req.flash('error') || []
+      User.getWalletBalance(user.id, (errW, walletBalance) => {
+        if (!errW) {
+          req.session.user.walletBalance = walletBalance;
+        }
+
+        res.render('payment', {
+          user: req.session.user,
+          cart: items,
+          subtotal,
+          tax,
+          totalAmount,
+          walletBalance: walletBalance || 0,
+          selectedMethod: req.session.paymentMethod || '',
+          errors: req.flash('error') || []
+        });
       });
     });
   },
@@ -43,7 +51,7 @@ const InvoiceController = {
     const user = req.session.user;
     const method = (req.body.paymentMethod || '').trim();
 
-    const allowedMethods = ['Stripe', 'Cash', 'PayPal', 'NETSQR'];
+    const allowedMethods = ['Stripe', 'Cash', 'PayPal', 'NETSQR', 'EWallet'];
     if (!allowedMethods.includes(method)) {
       req.flash('error', 'Please choose a valid payment method.');
       return res.redirect('/payment');
@@ -78,6 +86,61 @@ const InvoiceController = {
           paymentMethod: method
         });
       });
+    }
+
+    if (method === 'EWallet') {
+      Cart.getItemsByUser(user.id, (errC, items) => {
+        if (errC) {
+          req.flash('error', 'Could not load cart.');
+          return res.redirect('/payment');
+        }
+        let subtotal = 0;
+        (items || []).forEach(i => subtotal += (parseFloat(i.price) || 0) * (parseInt(i.quantity, 10) || 0));
+        const totalAmount = parseFloat(subtotal.toFixed(2));
+
+        User.getWalletBalance(user.id, (errW, balance) => {
+          if (errW) {
+            req.flash('error', 'Could not load wallet balance.');
+            return res.redirect('/payment');
+          }
+          if (balance < totalAmount) {
+            req.flash('error', 'Insufficient wallet balance.');
+            return res.redirect('/payment');
+          }
+
+          Invoice.createFromCart(user.id, 'EWallet', (errInv, paidData) => {
+            if (errInv) {
+              req.flash('error', errInv.message || 'Could not complete wallet payment.');
+              return res.redirect('/payment');
+            }
+
+            User.adjustWalletBalance(user.id, -totalAmount, (errAdj, newBalance) => {
+              if (errAdj) {
+                console.error('Wallet deduction failed:', errAdj.message);
+              } else {
+                req.session.user.walletBalance = newBalance;
+              }
+
+              paidData.header.subtotal = parseFloat(paidData.header.subtotal) || 0;
+              paidData.header.tax = parseFloat(paidData.header.tax) || 0;
+              paidData.header.totalAmount = parseFloat(paidData.header.totalAmount) || 0;
+              paidData.items = (paidData.items || []).map((it) => ({
+                ...it,
+                price: parseFloat(it.price) || 0,
+                quantity: parseInt(it.quantity, 10) || 0
+              }));
+
+              return res.render('invoice', {
+                user,
+                header: paidData.header,
+                items: paidData.items,
+                paymentMethod: 'EWallet'
+              });
+            });
+          });
+        });
+      });
+      return;
     }
 
     // Online methods (PayPal / NETS QR): create a PENDING invoice first
@@ -172,6 +235,122 @@ const InvoiceController = {
         req.flash('error', e.message || 'Could not start online payment.');
         return res.redirect('/payment');
       }
+    });
+  },
+
+  // GET /payment/retry/:invoiceId -> retry payment for existing invoice
+  async retryPayment(req, res) {
+    const user = req.session.user;
+    const invoiceId = parseInt(req.params.invoiceId, 10);
+    if (!user || Number.isNaN(invoiceId)) {
+      req.flash('error', 'Invalid invoice id.');
+      return res.redirect('/history');
+    }
+
+    Invoice.getById(invoiceId, user.id, async (err, data) => {
+      if (err || !data || !data.header) {
+        req.flash('error', err?.message || 'Invoice not found.');
+        return res.redirect('/history');
+      }
+
+      const header = data.header;
+      const method = header.paymentMethod || '';
+      const status = header.status || '';
+      const onlineMethods = ['PayPal', 'Stripe', 'NETSQR'];
+      const blockedStatuses = ['PAID', 'REFUNDED', 'PARTIALLY_REFUNDED'];
+
+      if (!onlineMethods.includes(method)) {
+        req.flash('error', 'Only online payments can be retried.');
+        return res.redirect(`/invoice/${invoiceId}`);
+      }
+      if (blockedStatuses.includes(status)) {
+        req.flash('error', 'This invoice cannot be retried.');
+        return res.redirect(`/invoice/${invoiceId}`);
+      }
+
+      Invoice.resetPendingPayment({ invoiceId, userId: user.id }, async (errReset) => {
+        if (errReset) {
+          req.flash('error', errReset.message || 'Could not restart payment.');
+          return res.redirect(`/invoice/${invoiceId}`);
+        }
+
+        try {
+          if (method === 'PayPal') {
+            return res.render('paypal_checkout', {
+              user,
+              invoiceId,
+              totalAmount: parseFloat(header.totalAmount) || 0,
+              paypalClientId: process.env.PAYPAL_CLIENT_ID || '',
+            });
+          }
+
+          if (method === 'Stripe') {
+            const stripe = require('../services/stripe');
+            const amount = parseFloat(header.totalAmount) || 0;
+            const session = await stripe.createCheckoutSession({
+              amount,
+              invoiceId,
+              userId: user.id,
+            });
+
+            if (!session || !session.id || !session.url) {
+              throw new Error('Stripe did not return a valid checkout session.');
+            }
+
+            return Invoice.updateProviderMeta(
+              { invoiceId, userId: user.id, provider: 'STRIPE', providerRef: session.id },
+              (errUp) => {
+                if (errUp) console.error('Failed to store Stripe meta:', errUp.message);
+                return res.redirect(session.url);
+              }
+            );
+          }
+
+          if (method === 'NETSQR') {
+            const crypto = require('crypto');
+            const nets = require('../services/nets');
+            const staticTxnId = (process.env.NETS_TXN_ID || '').trim();
+            const txnId = staticTxnId || `sandbox_nets|m|${crypto.randomUUID()}`;
+            const amount = parseFloat(header.totalAmount) || 0;
+
+            const qr = await nets.requestQr({
+              amount: amount.toFixed(2),
+              txnId,
+              notifyMobile: 0,
+            });
+
+            if (!qr.qrCodeDataUrl || !qr.txnRetrievalRef) {
+              throw new Error('NETS did not return a valid QR code / transaction reference.');
+            }
+
+            return Invoice.updateProviderMeta(
+              { invoiceId, userId: user.id, provider: 'NETSQR', providerRef: qr.txnRetrievalRef },
+              (errUp) => {
+                if (errUp) console.error('Failed to store NETS meta:', errUp.message);
+                return res.render('netsQr', {
+                  title: 'NETS QR Payment',
+                  user,
+                  invoiceId,
+                  totalAmount: amount,
+                  qrCodeUrl: qr.qrCodeDataUrl,
+                  txnRetrievalRef: qr.txnRetrievalRef,
+                  apiKey: process.env.NETS_API_KEY || process.env.API_KEY || '',
+                  projectId: process.env.NETS_PROJECT_ID || process.env.PROJECT_ID || '',
+                  courseInitId: (() => { try { return require('../course_init_id').courseInitId || ''; } catch(_) { return ''; } })(),
+                  fullNetsResponse: qr.raw || {},
+                });
+              }
+            );
+          }
+
+          req.flash('error', 'Unsupported payment method.');
+          return res.redirect(`/invoice/${invoiceId}`);
+        } catch (e) {
+          console.error('Retry payment error:', e);
+          req.flash('error', e.message || 'Could not restart payment.');
+          return res.redirect(`/invoice/${invoiceId}`);
+        }
+      });
     });
   },
 

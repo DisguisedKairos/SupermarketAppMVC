@@ -49,7 +49,7 @@ async function requestQr({ amount, txnId, notifyMobile = 0 }) {
   const url = `${baseUrl}${requestPath}`;
 
   const fallbackTxnId =
-    (process.env.NETS_TXN_ID || "").trim() || "sandbox_nets|m|00000000-0000-0000-0000-000000000000";
+    (process.env.NETS_TXN_ID || "").trim() || "sandbox_nets|m|8ff8e5b6-d43e-4786-8ac5-7accf8c5bd9b";
 
   const requestBody = {
     txn_id: txnId || fallbackTxnId,

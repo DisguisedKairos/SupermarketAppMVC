@@ -17,6 +17,7 @@ const CartController = require('./controllers/CartController');
 const WishlistController = require('./controllers/WishlistController');
 const InvoiceController = require('./controllers/InvoiceController');
 const Cart = require('./models/Cart');
+const Invoice = require('./models/Invoice');
 
 // View engine
 app.set('view engine', 'ejs');
@@ -120,6 +121,7 @@ app.post('/cart/clear', checkAuthenticated, CartController.clear);
 app.post('/checkout', checkAuthenticated, InvoiceController.checkout);
 app.get('/payment', checkAuthenticated, InvoiceController.paymentForm);
 app.post('/payment', checkAuthenticated, InvoiceController.processPayment);
+app.get('/payment/retry/:invoiceId', checkAuthenticated, InvoiceController.retryPayment);
 
 // PayPal JS SDK endpoints (slides)
 app.post('/api/paypal/create-order', checkAuthenticated, express.json(), InvoiceController.paypalApiCreateOrder);
@@ -157,7 +159,24 @@ app.get('/nets-qr/success', checkAuthenticated, (req, res) => {
     });
   });
 });
-app.get('/nets-qr/fail', checkAuthenticated, (req, res) => res.render('netsTxnFailStatus', { message: 'Transaction Failed. Please try again.' }));
+app.get('/nets-qr/fail', checkAuthenticated, (req, res) => {
+  const user = req.session.user;
+  const txnRetrievalRef = (req.query.txn_retrieval_ref || '').trim();
+  if (!txnRetrievalRef) {
+    return res.render('netsTxnFailStatus', { message: 'Transaction Failed. Please try again.' });
+  }
+
+  Invoice.findByProviderRef('NETSQR', txnRetrievalRef, (err, row) => {
+    if (err || !row || row.userId !== user.id) {
+      return res.render('netsTxnFailStatus', { message: 'Transaction Failed. Please try again.' });
+    }
+    return res.render('netsTxnFailStatus', {
+      message: 'Transaction Failed. Please try again.',
+      invoiceId: row.id,
+      paymentMethod: row.paymentMethod || null,
+    });
+  });
+});
 
 // NETS QR (slides) - SSE status endpoint
 app.get('/sse/payment-status/:txnRetrievalRef', checkAuthenticated, InvoiceController.netsSsePaymentStatus);

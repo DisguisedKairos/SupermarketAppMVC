@@ -350,6 +350,26 @@ const Invoice = {
     });
   },
 
+  resetPendingPayment({ invoiceId, userId }, callback) {
+    const sql = `
+      UPDATE invoice
+      SET status='PENDING_PAYMENT',
+          provider = NULL,
+          providerRef = NULL,
+          paidAt = NULL,
+          voidedAt = NULL
+      WHERE id = ? AND userId = ?
+    `;
+    db.query(sql, [invoiceId, userId], (err) => {
+      if (err) return callback(err);
+      Invoice.addStatusHistory(
+        { invoiceId, status: 'PENDING_PAYMENT', note: 'Payment retry started', actorUserId: userId, actorRole: 'user' },
+        () => {}
+      );
+      return callback(null, true);
+    });
+  },
+
   markVoided({ invoiceId, adminUserId, reason }, callback) {
     const sql = `
       UPDATE invoice
@@ -428,19 +448,26 @@ const Invoice = {
               return db.rollback(() => callback(errU));
             }
 
-            db.commit((errC) => {
-              if (errC) return db.rollback(() => callback(errC));
-              Invoice.addStatusHistory(
-                {
-                  invoiceId,
-                  status: newStatus,
-                  note: reason || `Refunded ${reqAmount.toFixed(2)}`,
-                  actorUserId: adminUserId,
-                  actorRole: 'admin',
-                },
-                () => {}
-              );
-              return callback(null, true);
+            const walletSql = 'UPDATE users SET walletBalance = walletBalance + ? WHERE id = ?';
+            db.query(walletSql, [reqAmount, inv.userId], (errW) => {
+              if (errW) {
+                return db.rollback(() => callback(errW));
+              }
+
+              db.commit((errC) => {
+                if (errC) return db.rollback(() => callback(errC));
+                Invoice.addStatusHistory(
+                  {
+                    invoiceId,
+                    status: newStatus,
+                    note: reason || `Refunded ${reqAmount.toFixed(2)} to wallet`,
+                    actorUserId: adminUserId,
+                    actorRole: 'admin',
+                  },
+                  () => {}
+                );
+                return callback(null, true);
+              });
             });
           });
         });

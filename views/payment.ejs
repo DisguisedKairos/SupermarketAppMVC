@@ -63,6 +63,18 @@
                 </label>
 
                 <label class="list-group-item d-flex gap-3 align-items-center">
+                  <input class="form-check-input" type="radio" name="paymentMethod" value="EWallet"
+                    <%= selectedMethod === 'EWallet' ? 'checked' : '' %>
+                    <%= (walletBalance || 0) < Number(totalAmount) ? 'disabled' : '' %>>
+                  <div>
+                    <div class="fw-semibold">E-Wallet</div>
+                    <small class="text-muted">
+                      Pay using wallet balance (available $<%= Number(walletBalance || 0).toFixed(2) %>)
+                    </small>
+                  </div>
+                </label>
+
+                <label class="list-group-item d-flex gap-3 align-items-center">
                   <input class="form-check-input" type="radio" name="paymentMethod" value="Cash" <%= selectedMethod === 'Cash' ? 'checked' : '' %>>
                   <div>
                     <div class="fw-semibold">Cash on Delivery</div>
@@ -111,6 +123,7 @@
             <div class="d-flex justify-content-between"><span>Tax:</span><strong>$<%= Number(tax).toFixed(2) %></strong></div>
             <hr>
             <div class="d-flex justify-content-between"><span>Total:</span><strong class="fs-5 text-success">$<%= Number(totalAmount).toFixed(2) %></strong></div>
+            <div class="d-flex justify-content-between mt-2"><span>Wallet Balance:</span><strong>$<%= Number(walletBalance || 0).toFixed(2) %></strong></div>
           </div>
         </div>
       </div>
